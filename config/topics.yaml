@@ -1,0 +1,19 @@
+vision:
+  result_topic: /vgr/vision_result
+  plan_topic: /vgr/plan
+
+robot:
+  joint_state_topic: /joint_states
+  vel_cmd_topic: /velocity_controller/command
+
+gripper:
+  ns: /vgr_gripper               # node name/namespace
+  cmd_topic: "~cmd"              # resolves to /vgr_gripper/cmd
+  open_mm_topic: "~open_mm"
+  close_mm_topic: "~close_mm"
+  close_force_topic: "~close_force_n"
+  status_topic: "~status"
+
+pose_recorder:
+  save_topic: /vgr/pose_recorder/save
+  poses_path: poses/recorded_poses.yaml

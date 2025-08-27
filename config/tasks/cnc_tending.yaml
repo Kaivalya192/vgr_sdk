@@ -1,0 +1,4 @@
+place_xyzyaw: [400.0, 250.0, 0.0, 0.0]
+align_theta: true
+theta_tolerance_deg: 7.5
+scale_tolerance: 0.25

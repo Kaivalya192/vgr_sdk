@@ -1,0 +1,6 @@
+version: 1
+poses:
+  home:
+    name: home
+    joints: [0, 0, 0, 0, 0, 0]
+    stamp: 0

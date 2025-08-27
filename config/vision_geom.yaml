@@ -1,0 +1,20 @@
+# processed-frame geometry from the Vision app
+proc_width: 640
+proc_height: 360
+
+# global scale (px → mm). set both; they can be different.
+mm_per_px_x: 0.25
+mm_per_px_y: 0.25
+
+# pixel that maps to the world origin (mm)
+origin_px: [0.0, 0.0]
+origin_mm: [0.0, 0.0]
+
+# flips/signs to match robot world handedness
+invert_x: false
+invert_y: false
+theta_sign: 1       # +1 if image theta maps directly to world yaw; -1 if inverted
+yaw_offset_deg: 0.0 # add this constant after conversion
+
+# fixed pick plane
+plane_z_mm: 0.0

@@ -1,0 +1,29 @@
+<!-- ==============================
+     FILE: launch/vgr_sdk.launch
+     ============================== -->
+<launch>
+  <!-- Vision bridge: UDP -> /vgr/vision_result -->
+  <node pkg="vgr_sdk" type="vision_bridge_node.py" name="vgr_vision_bridge" output="screen">
+    <param name="bind_ip" value="0.0.0.0" />
+    <param name="port" value="40001" />
+    <param name="topic" value="/vgr/vision_result" />
+    <param name="schema_path" value="$(find vgr_sdk)/schemas/vision_result.schema.json" />
+  </node>
+
+  <!-- VGR manager: choose task via param -->
+  <node pkg="vgr_sdk" type="vgr_manager_node.py" name="vgr_manager" output="screen">
+    <param name="vision_geom" value="$(find vgr_sdk)/config/vision_geom.yaml" />
+    <param name="task_config" value="$(find vgr_sdk)/config/tasks/sorting.yaml" />
+    <param name="task" value="sorting" />
+    <param name="sub_result_topic" value="/vgr/vision_result" />
+    <param name="pub_plan_topic" value="/vgr/plan" />
+  </node>
+
+  <!-- Gripper node (sim backend by default) -->
+  <node pkg="vgr_sdk" type="gripper_node.py" name="vgr_gripper" output="screen">
+    <param name="stroke_min_mm" value="5.0" />
+    <param name="stroke_max_mm" value="80.0" />
+    <param name="publish_rate_hz" value="2.0" />
+    <!-- <param name="driver_module" value="your_driver.python.module" /> -->
+  </node>
+</launch>
