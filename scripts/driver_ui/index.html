@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VGR Driver Smoke Test — Simple Web UI</title>
+  <script src="https://cdn.jsdelivr.net/npm/roslib/build/roslib.min.js"></script>
+  <style>
+    :root{
+      --bg:#0b1020;--panel:#111832;--muted:#7f8ba8;--text:#e8ecf6;--accent:#6ea8fe;--accent-2:#9cffcb;--warn:#ffcc66;--bad:#ff6b6b;
+      --radius:14px;--gap:14px;--shadow:0 10px 30px rgba(0,0,0,.35);
+    }
+    *{box-sizing:border-box} body{margin:0;background:radial-gradient(1100px 800px at 20% -20%,#1f2a4d,transparent) var(--bg);color:var(--text);font:15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"}
+    header{padding:20px 18px 8px;display:flex;align-items:center;gap:10px}
+    header .dot{width:10px;height:10px;border-radius:50%;background:var(--bad);box-shadow:0 0 0 2px rgba(255,255,255,.08)}
+    header h1{font-size:18px;margin:0;font-weight:700}
+    header small{color:var(--muted)}
+    .wrap{padding:16px;max-width:1100px;margin:0 auto;}
+    .grid{display:grid;grid-template-columns:1.1fr 1fr;gap:var(--gap)}
+    @media (max-width: 980px){.grid{grid-template-columns:1fr}}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));border:1px solid rgba(255,255,255,.08);border-radius:var(--radius);box-shadow:var(--shadow)}
+    .card h2{margin:0;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.07);font-size:14px;letter-spacing:.3px;text-transform:uppercase;color:var(--muted)}
+    .card .content{padding:14px}
+    label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+    input[type="text"], input[type="number"], select, textarea{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:#0f152b;color:var(--text);outline:none}
+    textarea{min-height:70px;resize:vertical}
+    .row{display:grid;grid-template-columns:repeat(12,1fr);gap:10px}
+    .col-6{grid-column:span 6}.col-4{grid-column:span 4}.col-3{grid-column:span 3}.col-8{grid-column:span 8}.col-12{grid-column:span 12}
+    .btn{appearance:none;border:none;background:linear-gradient(180deg, #2b3b6a, #22345f);color:var(--text);padding:10px 14px;border-radius:12px;cursor:pointer;box-shadow:0 6px 16px rgba(0,0,0,.35);transition:transform .05s ease, opacity .2s}
+    .btn:hover{opacity:.95}.btn:active{transform:translateY(1px)} .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn.secondary{background:linear-gradient(180deg, #28435a, #1e3549)}
+    .btn.warn{background:linear-gradient(180deg, #5a3d1d, #4b2f13);color:#ffd99b}
+    .btn.bad{background:linear-gradient(180deg, #5a1f1f, #411515);color:#ffbbbb}
+    .btn.good{background:linear-gradient(180deg, #275b3e, #1f4631);color:#b6ffd7}
+    .actions{display:flex;flex-wrap:wrap;gap:10px}
+    .stat{font-variant-numeric:tabular-nums;padding:8px 12px;border-radius:12px;background:#0f162f;border:1px solid rgba(255,255,255,.08);display:inline-flex;gap:8px;align-items:center}
+    code.inline{background:#0f162f;border:1px solid rgba(255,255,255,.08);padding:2px 6px;border-radius:6px}
+    .log{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;background:#0a0f21;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px;height:200px;overflow:auto;white-space:pre-wrap}
+    .footer{color:var(--muted);padding:16px}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#0f162f;border:1px solid rgba(255,255,255,.08)}
+    .right{display:flex;gap:10px;align-items:center;margin-left:auto}
+  </style>
+</head>
+<body>
+  <header>
+    <div id="statusDot" class="dot" title="Disconnected"></div>
+    <h1>VGR Driver Smoke Test — Simple Web UI</h1>
+    <small id="connText">Disconnected</small>
+    <div class="right">
+      <span class="pill">Topics: <code class="inline" id="topicCmd">/vgr_driver_smoke_test/cmd</code> • <code class="inline" id="topicStatus">/vgr_driver_smoke_test/status</code></span>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="grid">
+      <!-- Connection & Config -->
+      <section class="card">
+        <h2>Connection</h2>
+        <div class="content">
+          <div class="row" style="margin-bottom:10px">
+            <div class="col-8">
+              <label>rosbridge WebSocket URL</label>
+              <input id="wsUrl" type="text" value="ws://localhost:9090" />
+            </div>
+            <div class="col-4">
+              <label>Node namespace (for ~cmd / ~status)</label>
+              <input id="ns" type="text" value="/vgr_driver_smoke_test" />
+            </div>
+          </div>
+          <div class="actions">
+            <button id="btnConnect" class="btn good">Connect</button>
+            <button id="btnDisconnect" class="btn bad" disabled>Disconnect</button>
+            <span class="stat">Last status: <strong id="lastStatus">—</strong></span>
+            <span class="stat">Steps: <strong id="stepCount">0</strong></span>
+            <span class="stat">Updated: <strong id="lastTime">—</strong></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quick actions -->
+      <section class="card">
+        <h2>Playback & File</h2>
+        <div class="content">
+          <div class="actions" style="margin-bottom:10px">
+            <button data-cmd="play" class="btn">▶ Play</button>
+            <button data-cmd="stop" class="btn bad">■ Stop</button>
+            <button data-cmd="list" class="btn secondary">List (see logs)</button>
+          </div>
+          <div class="actions">
+            <button data-cmd="save" class="btn">💾 Save</button>
+            <button data-cmd="load" class="btn">📂 Load</button>
+            <button data-cmd="clear" class="btn warn">🧹 Clear</button>
+          </div>
+          <p class="footer">Save/Load uses the node's <code class="inline">~path</code> param (default <code class="inline">poses/driver_test.yaml</code>).</p>
+        </div>
+      </section>
+
+      <!-- Record: Joint / TCP -->
+      <section class="card">
+        <h2>Record Pose</h2>
+        <div class="content">
+          <div class="row" style="margin-bottom:10px">
+            <div class="col-3">
+              <label>Joint dwell (s)</label>
+              <input id="jointDwell" type="number" value="0.0" step="0.05" />
+            </div>
+            <div class="col-3" style="display:flex;align-items:end">
+              <button id="btnRecordJoint" class="btn">Record Joint</button>
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-3">
+              <label>TCP dwell (s)</label>
+              <input id="tcpDwell" type="number" value="0.0" step="0.05" />
+            </div>
+            <div class="col-3">
+              <label>TCP speed (mm/s)</label>
+              <input id="tcpSpeed" type="number" value="200" step="10" />
+            </div>
+            <div class="col-3" style="display:flex;align-items:end">
+              <button id="btnRecordTCP" class="btn">Record TCP</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Gripper -->
+      <section class="card">
+        <h2>Gripper</h2>
+        <div class="content">
+          <div class="row">
+            <div class="col-4">
+              <label>Action</label>
+              <select id="gripAction">
+                <option value="open">open</option>
+                <option value="close">close</option>
+              </select>
+            </div>
+            <div class="col-4">
+              <label>Width (mm)</label>
+              <input id="gripWidth" type="number" value="30" step="1" />
+            </div>
+            <div class="col-4" style="display:flex;align-items:end">
+              <button id="btnGrip" class="btn">Add Gripper Step</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Raw JSON & Logs -->
+      <section class="card" style="grid-column:1/-1">
+        <h2>Advanced</h2>
+        <div class="content">
+          <div class="row" style="margin-bottom:10px">
+            <div class="col-8">
+              <label>Send a raw JSON command to ~cmd</label>
+              <textarea id="rawJson">{"cmd":"list"}</textarea>
+            </div>
+            <div class="col-4" style="display:flex;align-items:end">
+              <button id="btnSendRaw" class="btn">Send Raw JSON</button>
+            </div>
+          </div>
+          <div class="actions" style="margin-bottom:10px">
+            <label style="display:flex;align-items:center;gap:8px"><input id="toggleLogs" type="checkbox" /> Listen to ROS logs (<code class="inline">/rosout</code>)</label>
+          </div>
+          <div class="row">
+            <div class="col-12">
+              <div class="log" id="log"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <p class="footer">How it works: this page publishes <code class="inline">std_msgs/String</code> JSON to <code class="inline">~cmd</code> and listens to <code class="inline">~status</code> from your node. The <em>List</em> output appears in ROS logs; enable <strong>Listen to ROS logs</strong> above to see those lines here.</p>
+  </div>
+
+  <script>
+    // --- Helpers ---
+    const $ = (sel)=>document.querySelector(sel);
+    const pad = (n)=>String(n).padStart(2,'0');
+    const nowStr = ()=>{const d=new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`};
+
+    function normalizeNs(ns){
+      if(!ns) return '/vgr_driver_smoke_test';
+      ns = ns.trim();
+      if(!ns.startsWith('/')) ns = '/' + ns;
+      return ns.replace(/\/$/,'');
+    }
+
+    function updateTopicLabels(){
+      const ns = normalizeNs($('#ns').value);
+      $('#topicCmd').textContent = `${ns}/cmd`;
+      $('#topicStatus').textContent = `${ns}/status`;
+    }
+
+    // --- ROS state ---
+    let ros = null;
+    let cmdTopic = null;
+    let statusTopic = null;
+    let rosoutTopic = null;
+
+    function setConnected(yes){
+      $('#statusDot').style.background = yes ? 'var(--accent-2)' : 'var(--bad)';
+      $('#connText').textContent = yes ? 'Connected' : 'Disconnected';
+      $('#btnConnect').disabled = yes;
+      $('#btnDisconnect').disabled = !yes;
+      document.querySelectorAll('.btn').forEach(b=>{
+        if(['btnConnect'].includes(b.id)) return;
+        b.disabled = !yes && !b.classList.contains('bad');
+      });
+    }
+
+    function logLine(text){
+      const log = $('#log');
+      log.textContent += `[${nowStr()}] ${text}\n`;
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function buildTopics(){
+      const ns = normalizeNs($('#ns').value);
+      cmdTopic = new ROSLIB.Topic({ ros, name: `${ns}/cmd`, messageType: 'std_msgs/String'});
+      statusTopic = new ROSLIB.Topic({ ros, name: `${ns}/status`, messageType: 'std_msgs/String'});
+    }
+
+    function subscribeStatus(){
+      statusTopic.subscribe((msg)=>{
+        try {
+          const payload = JSON.parse(msg.data);
+          $('#lastStatus').textContent = payload.status ?? msg.data;
+          $('#stepCount').textContent = payload.count ?? '—';
+        } catch(e){
+          $('#lastStatus').textContent = msg.data;
+        }
+        $('#lastTime').textContent = nowStr();
+      });
+    }
+
+    function toggleRosout(on){
+      if(!ros) return;
+      if(on){
+        if(!rosoutTopic){
+          rosoutTopic = new ROSLIB.Topic({ ros, name: '/rosout', messageType: 'rosgraph_msgs/Log'});
+        }
+        rosoutTopic.subscribe((msg)=>{
+          // Filter for lines from our node or tagged lines from the script
+          const want = (msg.name && msg.name.includes('vgr_driver_smoke_test')) || (msg.msg && msg.msg.includes('[driver_smoke]'));
+          if(want){
+            logLine(msg.msg);
+          }
+        });
+      } else {
+        if(rosoutTopic){ rosoutTopic.unsubscribe(); }
+      }
+    }
+
+    function publishCmd(obj){
+      if(!cmdTopic){ logLine('Not connected'); return; }
+      try{
+        const m = new ROSLIB.Message({ data: JSON.stringify(obj) });
+        cmdTopic.publish(m);
+        logLine('→ sent ' + JSON.stringify(obj));
+      }catch(e){
+        logLine('publish error: ' + e.message);
+      }
+    }
+
+    // --- Event wiring ---
+    $('#btnConnect').addEventListener('click', ()=>{
+      const url = $('#wsUrl').value.trim();
+      try{ localStorage.setItem('vgr_ws', url); localStorage.setItem('vgr_ns', normalizeNs($('#ns').value)); }catch{}
+      ros = new ROSLIB.Ros({ url });
+      ros.on('connection', ()=>{ setConnected(true); updateTopicLabels(); buildTopics(); subscribeStatus(); if($('#toggleLogs').checked) toggleRosout(true); logLine('Connected to ' + url); });
+      ros.on('close', ()=>{ setConnected(false); logLine('Connection closed'); });
+      ros.on('error', (err)=>{ setConnected(false); logLine('Connection error: ' + (err?.message||err)); });
+    });
+
+    $('#btnDisconnect').addEventListener('click', ()=>{
+      try{ if(ros){ ros.close(); } } catch(e){}
+    });
+
+    document.querySelectorAll('button[data-cmd]').forEach(btn=>{
+      btn.addEventListener('click', ()=> publishCmd({ cmd: btn.dataset.cmd }) );
+    });
+
+    $('#btnRecordJoint').addEventListener('click', ()=>{
+      const dwell = parseFloat($('#jointDwell').value||'0')||0;
+      publishCmd({ cmd:'record_joint', dwell_s: dwell });
+    });
+
+    $('#btnRecordTCP').addEventListener('click', ()=>{
+      const dwell = parseFloat($('#tcpDwell').value||'0')||0;
+      const speed = parseFloat($('#tcpSpeed').value||'200')||200;
+      publishCmd({ cmd:'record_tcp', dwell_s: dwell, speed_mm_s: speed });
+    });
+
+    $('#btnGrip').addEventListener('click', ()=>{
+      const action = $('#gripAction').value;
+      const width = parseFloat($('#gripWidth').value||'30')||30;
+      publishCmd({ cmd:'add_gripper', action, width_mm: width });
+    });
+
+    $('#btnSendRaw').addEventListener('click', ()=>{
+      try{
+        const obj = JSON.parse($('#rawJson').value);
+        publishCmd(obj);
+      }catch(e){
+        logLine('Raw JSON parse error: ' + e.message);
+      }
+    });
+
+    $('#toggleLogs').addEventListener('change', (e)=>{
+      toggleRosout(e.target.checked);
+    });
+
+    $('#ns').addEventListener('input', updateTopicLabels);
+
+    // Restore from localStorage
+    (function(){
+      try{
+        const url = localStorage.getItem('vgr_ws'); if(url) $('#wsUrl').value = url;
+        const ns  = localStorage.getItem('vgr_ns'); if(ns) $('#ns').value = ns;
+      }catch{}
+      updateTopicLabels(); setConnected(false);
+      logLine('Ready. Configure connection then click Connect.');
+    })();
+  </script>
+</body>
+</html>

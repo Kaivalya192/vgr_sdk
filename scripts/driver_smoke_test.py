@@ -2,6 +2,7 @@
 # ====================================
 # FILE: scripts/driver_smoke_test.py
 # ====================================
+# source /home/pikapika/Yash_WS/Addverb_Heal_and_Syncro_Hardware/devel/setup.bash 
 from __future__ import annotations
 import threading
 import time
@@ -11,8 +12,11 @@ from typing import List, Dict, Any, Optional
 
 import rospy
 import yaml
-from std_msgs.msg import String, Float64
+from std_msgs.msg import String
 from sensor_msgs.msg import JointState
+
+# Addverb action goals (direct publish)
+from addverb_cobot_msgs.msg import GraspActionGoal, ReleaseActionGoal
 
 # Robot backend (KDL IK + velocity controller like your scripts)
 from vgr_sdk.drivers.robot_velocity_backend import Backend as RobotBackend
@@ -64,26 +68,32 @@ class DriverSmokeTest:
       {"cmd":"stop"}
 
     Params (~):
-      ~path                 : poses/driver_test.yaml
-      ~gripper_ns           : /vgr_gripper
-      ~default_tcp_speed    : 200.0
-      ~default_dwell_s      : 0.0
+      ~path                   : poses/driver_test.yaml
+      ~default_tcp_speed      : 200.0
+      ~default_dwell_s        : 0.0
+      ~topic_grasp_goal       : /robotA/grasp_action/goal
+      ~topic_release_goal     : /robotA/release_action/goal
+      ~default_grasp_force_n  : 100.0   (used for 'close')
     """
 
     def __init__(self):
         self.path = rospy.get_param("~path", "poses/driver_test.yaml")
-        self.gripper_ns = rospy.get_param("~gripper_ns", "/vgr_gripper")
         self.default_tcp_speed = float(rospy.get_param("~default_tcp_speed", 200.0))
         self.default_dwell_s = float(rospy.get_param("~default_dwell_s", 0.0))
+
+        # Direct Addverb action-goal topics
+        self.topic_grasp_goal = rospy.get_param("~topic_grasp_goal", "/robotA/grasp_action/goal")
+        self.topic_release_goal = rospy.get_param("~topic_release_goal", "/robotA/release_action/goal")
+        self.default_grasp_force = float(rospy.get_param("~default_grasp_force_n", 100.0))
 
         # Robot + state
         self.robot = RobotBackend()
         self.joint_state = None  # type: Optional[List[float]]
         rospy.Subscriber("/joint_states", JointState, self._on_js, queue_size=50)
 
-        # Gripper pubs (use your gripper_node topics)
-        self.pub_open = rospy.Publisher(f"{self.gripper_ns}/open_mm",  Float64, queue_size=10)
-        self.pub_close = rospy.Publisher(f"{self.gripper_ns}/close_mm", Float64, queue_size=10)
+        # Gripper (direct action goals; width->force mapping intentionally NOT used)
+        self.pub_grasp_goal = rospy.Publisher(self.topic_grasp_goal, GraspActionGoal, queue_size=10)
+        self.pub_release_goal = rospy.Publisher(self.topic_release_goal, ReleaseActionGoal, queue_size=10)
 
         # Command + status
         rospy.Subscriber("~cmd", String, self._on_cmd, queue_size=20)
@@ -95,6 +105,7 @@ class DriverSmokeTest:
         self._stop_flag = threading.Event()
 
         rospy.loginfo("[driver_smoke] Ready. Publish JSON to ~cmd to record/play. (cmd examples: list | record_joint | record_tcp | add_gripper | save | load | play | stop)")
+        rospy.loginfo(f"[driver_smoke] Gripper direct publish: close -> {self.topic_grasp_goal} (force={self.default_grasp_force}N), open -> {self.topic_release_goal}")
 
     # ---------- Callbacks ----------
     def _on_js(self, msg: JointState):
@@ -207,6 +218,12 @@ class DriverSmokeTest:
             pass
         self._status("stopping")
 
+    def _ensure_conn(self, pub, timeout=1.0):
+        # Wait briefly for a subscriber (the action server)
+        t0 = time.time()
+        while pub.get_num_connections() == 0 and (time.time() - t0) < timeout and not rospy.is_shutdown():
+            rospy.sleep(0.02)
+
     def _run_sequence(self):
         self._status("playing")
         ok = True
@@ -231,9 +248,15 @@ class DriverSmokeTest:
 
                 elif _is_grip(s):
                     if s["action"] == "open":
-                        self.pub_open.publish(Float64(data=float(s["width_mm"])))
+                        self._ensure_conn(self.pub_release_goal)
+                        self.pub_release_goal.publish(ReleaseActionGoal())
+                        rospy.loginfo("[driver_smoke] GRIPPER open -> ReleaseActionGoal()")
                     else:
-                        self.pub_close.publish(Float64(data=float(s["width_mm"])))
+                        self._ensure_conn(self.pub_grasp_goal)
+                        g = GraspActionGoal()
+                        g.goal.grasp_force = float(self.default_grasp_force)
+                        self.pub_grasp_goal.publish(g)
+                        rospy.loginfo(f"[driver_smoke] GRIPPER close -> GraspActionGoal(force={self.default_grasp_force:.1f}N)")
                     # tiny settle time
                     rospy.sleep(0.2)
                 else:
