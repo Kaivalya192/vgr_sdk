@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VisionResult (light)",
+  "type": "object",
+  "required": ["version","session","timestamp_ms","camera","result","timing_ms"],
+  "properties": {
+    "version": {"type":"string"},
+    "sdk": {"type":"object"},
+    "session": {
+      "type":"object",
+      "required":["frame_id"],
+      "properties":{"frame_id":{"type":"integer"}}
+    },
+    "timestamp_ms": {"type":"integer"},
+    "camera": {
+      "type":"object",
+      "properties": {
+        "proc_width":{"type":"integer"},
+        "proc_height":{"type":"integer"}
+      }
+    },
+    "result": {
+      "type":"object",
+      "required":["objects"],
+      "properties": {
+        "objects": {
+          "type":"array",
+          "items": {
+            "type":"object",
+            "required":["object_id","name","detections"],
+            "properties": {
+              "object_id":{"type":"integer"},
+              "name":{"type":"string"},
+              "template_size":{"type":"array","items":{"type":"number"}},
+              "detections": {
+                "type":"array",
+                "items":{
+                  "type":"object",
+                  "required":["instance_id","score","inliers","pose"],
+                  "properties":{
+                    "instance_id":{"type":"integer"},
+                    "score":{"type":"number"},
+                    "inliers":{"type":"integer"},
+                    "pose":{
+                      "type":"object",
+                      "required":["x","y","theta_deg","x_scale","y_scale"],
+                      "properties":{
+                        "x":{"type":"number"}, "y":{"type":"number"},
+                        "theta_deg":{"type":"number"},
+                        "x_scale":{"type":"number"}, "y_scale":{"type":"number"}
+                      }
+                    },
+                    "center":{"type":"array","items":{"type":"number"}},
+                    "quad":{"type":"array","items":{"type":"array","items":{"type":"number"}}},
+                    "color":{"type":"object"}
+                  },
+                  "additionalProperties": true
+                }
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "timing_ms": {"type":"object"}
+  },
+  "additionalProperties": true
+}

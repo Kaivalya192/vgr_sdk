@@ -1,0 +1,18 @@
+proc_width: 640
+proc_height: 480
+mm_per_px_x: 0.4498594334131664
+mm_per_px_y: 0.4394443559445971
+origin_px:
+- 460.2528161383546
+- 246.48123605145906
+origin_mm:
+- 148.69202330706582
+- 365.8440789237809
+- 623.4898940655077
+- 19.937607757850362
+swap_xy: true
+invert_x: true
+invert_y: true
+theta_sign: 1
+yaw_offset_deg: 15.0
+plane_z_mm: 377.0
