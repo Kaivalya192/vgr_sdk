@@ -45,6 +45,7 @@ class VisionBridgeNode:
                 continue
             try:
                 msg = String(data=json.dumps(payload, separators=(",", ":")))
+                rospy.loginfo(f"[vision_bridge]  {msg}")
                 self.pub.publish(msg)
             except Exception as e:
                 rospy.logwarn(f"[vision_bridge] publish error: {e}")

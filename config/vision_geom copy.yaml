@@ -1,10 +1,10 @@
 proc_width: 640
 proc_height: 480
-mm_per_px_x: 0.4537171515841266
-mm_per_px_y: 0.4387357235509349
+mm_per_px_x: 0.41
+mm_per_px_y: 0.46
 origin_px:
-- 591.6956669597114
-- 264.9519852613737
+- 587.0
+- 275.0
 origin_mm:
 - 148.69202330706582
 - 365.8440789237809
@@ -15,4 +15,4 @@ invert_x: true
 invert_y: true
 theta_sign: 1
 yaw_offset_deg: 15.0
-plane_z_mm: 377.0
+plane_z_mm: 377.00

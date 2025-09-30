@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>VGR Driver Smoke Test — Simple Web UI</title>
+  <title>VGR Driver Smoke Test — Simple Web UI (with Teleop)</title>
   <script src="https://cdn.jsdelivr.net/npm/roslib/build/roslib.min.js"></script>
   <style>
     :root{
@@ -35,10 +35,13 @@
     .actions{display:flex;flex-wrap:wrap;gap:10px}
     .stat{font-variant-numeric:tabular-nums;padding:8px 12px;border-radius:12px;background:#0f162f;border:1px solid rgba(255,255,255,.08);display:inline-flex;gap:8px;align-items:center}
     code.inline{background:#0f162f;border:1px solid rgba(255,255,255,.08);padding:2px 6px;border-radius:6px}
-    .log{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;background:#0a0f21;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px;height:200px;overflow:auto;white-space:pre-wrap}
+    .log{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;background:#0a0f21;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px;height:180px;overflow:auto;white-space:pre-wrap}
     .footer{color:var(--muted);padding:16px}
     .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#0f162f;border:1px solid rgba(255,255,255,.08)}
     .right{display:flex;gap:10px;align-items:center;margin-left:auto}
+    .teleop-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .nudge{padding:12px 8px;border-radius:8px;background:#0f162f;border:1px solid rgba(255,255,255,.04);text-align:center;cursor:pointer}
+    .kbdHint{color:var(--muted);font-size:12px;margin-top:8px}
   </style>
 </head>
 <body>
@@ -47,7 +50,7 @@
     <h1>VGR Driver Smoke Test — Simple Web UI</h1>
     <small id="connText">Disconnected</small>
     <div class="right">
-      <span class="pill">Topics: <code class="inline" id="topicCmd">/vgr_driver_smoke_test/cmd</code> • <code class="inline" id="topicStatus">/vgr_driver_smoke_test/status</code></span>
+      <span class="pill">Topics: <code class="inline" id="topicCmd">/vgr_driver_smoke_test/cmd</code> • <code class="inline" id="topicStatus">/vgr_driver_smoke_test/status</code> • <code class="inline" id="topicTeleop">/vgr_driver_smoke_test/teleop</code></span>
     </div>
   </header>
 
@@ -137,13 +140,93 @@
               </select>
             </div>
             <div class="col-4">
-              <label>Width (mm)</label>
-              <input id="gripWidth" type="number" value="30" step="1" />
+              <label>Force (N)</label>
+              <input id="gripForce" type="number" value="100" step="1" />
             </div>
             <div class="col-4" style="display:flex;align-items:end">
               <button id="btnGrip" class="btn">Add Gripper Step</button>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- Teleop -->
+      <section class="card">
+        <h2>Teleop (remote)</h2>
+        <div class="content">
+          <!-- Step sizes -->
+          <div class="row" style="margin-bottom:10px">
+            <div class="col-4">
+              <label>Step translation (mm)</label>
+              <input id="teleopTrans" type="number" value="5" step="1" />
+            </div>
+            <div class="col-4">
+              <label>Step yaw (deg)</label>
+              <input id="teleopYaw" type="number" value="5" step="0.5" />
+            </div>
+            <div class="col-4">
+              <label>Step roll / pitch (deg)</label>
+              <div style="display:flex; gap:8px">
+                <input id="teleopRoll" type="number" value="5" step="0.5" title="Roll step (deg)" />
+                <input id="teleopPitch" type="number" value="5" step="0.5" title="Pitch step (deg)" />
+              </div>
+            </div>
+          </div>
+
+          <div class="actions" style="margin-bottom:10px">
+            <button id="btnTeleopStart" class="btn good">Start Teleop</button>
+            <button id="btnTeleopStop" class="btn bad">Stop Teleop</button>
+            <label style="display:flex;align-items:center;gap:8px;margin-left:8px"><input id="sendAlsoToCmd" type="checkbox" /> Also send via <code class="inline">~cmd</code></label>
+          </div>
+
+          <!-- Directional and RPY buttons -->
+          <div style="margin-bottom:8px">
+            <div class="teleop-grid">
+              <!-- Row 1 -->
+              <div></div>
+              <div id="btnNudgeW" class="nudge">W<br><small>+X</small></div>
+              <div></div>
+
+              <!-- Row 2 -->
+              <div id="btnNudgeA" class="nudge">A<br><small>+Y</small></div>
+              <div id="btnNudgeS" class="nudge">S<br><small>-X</small></div>
+              <div id="btnNudgeD" class="nudge">D<br><small>-Y</small></div>
+
+              <!-- Row 3 -->
+              <div id="btnNudgeR" class="nudge">R<br><small>+Z</small></div>
+              <div id="btnNudgeSpace" class="nudge">SPACE<br><small>STOP</small></div>
+              <div id="btnNudgeF" class="nudge">F<br><small>-Z</small></div>
+
+              <!-- Row 4 -->
+              <div id="btnNudgeQ" class="nudge">Q<br><small>+Yaw</small></div>
+              <div id="btnNudgeG" class="nudge">G<br><small>Recapture</small></div>
+              <div id="btnNudgeE" class="nudge">E<br><small>-Yaw</small></div>
+
+              <!-- Row 5 (new): Roll/Pitch -->
+              <div id="btnRollPlus" class="nudge">Z<br><small>+Roll</small></div>
+              <div id="btnPitchPlus" class="nudge">C<br><small>+Pitch</small></div>
+              <div id="btnRollMinus" class="nudge">X<br><small>-Roll</small></div>
+
+              <!-- Row 6 (new): Pitch- and Print -->
+              <div></div>
+              <div id="btnPitchMinus" class="nudge">V<br><small>-Pitch</small></div>
+              <div id="btnPrint" class="nudge">P<br><small>Print</small></div>
+            </div>
+            <div class="kbdHint">
+              Tip: enable <strong>Page keys</strong> below and use
+              <strong>W/A/S/D</strong> (X/Y), <strong>R/F</strong> (Z),
+              <strong>Q/E</strong> (Yaw), <strong>Z/X</strong> (±Roll),
+              <strong>C/V</strong> (±Pitch), <strong>G</strong> (Recapture),
+              <strong>P</strong> (Print), <strong>Space</strong> (Stop).
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <label style="display:flex;align-items:center;gap:8px"><input id="enablePageKeys" type="checkbox" /> Enable Page keys</label>
+            <label style="display:flex;align-items:center;gap:8px;margin-left:12px"><input id="teleopLocalOnly" type="checkbox" /> Publish only to <code class="inline">/teleop</code> (don't also send to <code class="inline">~cmd</code>)</label>
+          </div>
+
+          <p class="footer">The teleop controls publish JSON (std_msgs/String) to the teleop topic. Formats supported by the node include combinations of <code>dx/dy/dz</code> (meters) and <code>roll/pitch/yaw</code> (radians).</p>
         </div>
       </section>
 
@@ -172,7 +255,7 @@
       </section>
     </div>
 
-    <p class="footer">How it works: this page publishes <code class="inline">std_msgs/String</code> JSON to <code class="inline">~cmd</code> and listens to <code class="inline">~status</code> from your node. The <em>List</em> output appears in ROS logs; enable <strong>Listen to ROS logs</strong> above to see those lines here.</p>
+    <p class="footer">How it works: the Teleop panel publishes <code class="inline">std_msgs/String</code> JSON to <code class="inline">/&lt;ns&gt;/teleop</code>. If enabled, it also sends the same JSON to <code class="inline">~cmd</code> so the node can react via its existing command path. Scroll the log to see published JSON and ROS logs.</p>
   </div>
 
   <script>
@@ -192,12 +275,14 @@
       const ns = normalizeNs($('#ns').value);
       $('#topicCmd').textContent = `${ns}/cmd`;
       $('#topicStatus').textContent = `${ns}/status`;
+      $('#topicTeleop').textContent = `${ns}/teleop`;
     }
 
     // --- ROS state ---
     let ros = null;
     let cmdTopic = null;
     let statusTopic = null;
+    let teleopTopic = null;
     let rosoutTopic = null;
 
     function setConnected(yes){
@@ -221,9 +306,11 @@
       const ns = normalizeNs($('#ns').value);
       cmdTopic = new ROSLIB.Topic({ ros, name: `${ns}/cmd`, messageType: 'std_msgs/String'});
       statusTopic = new ROSLIB.Topic({ ros, name: `${ns}/status`, messageType: 'std_msgs/String'});
+      teleopTopic = new ROSLIB.Topic({ ros, name: `${ns}/teleop`, messageType: 'std_msgs/String'});
     }
 
     function subscribeStatus(){
+      if(!statusTopic) return;
       statusTopic.subscribe((msg)=>{
         try {
           const payload = JSON.parse(msg.data);
@@ -243,7 +330,6 @@
           rosoutTopic = new ROSLIB.Topic({ ros, name: '/rosout', messageType: 'rosgraph_msgs/Log'});
         }
         rosoutTopic.subscribe((msg)=>{
-          // Filter for lines from our node or tagged lines from the script
           const want = (msg.name && msg.name.includes('vgr_driver_smoke_test')) || (msg.msg && msg.msg.includes('[driver_smoke]'));
           if(want){
             logLine(msg.msg);
@@ -254,14 +340,40 @@
       }
     }
 
-    function publishCmd(obj){
-      if(!cmdTopic){ logLine('Not connected'); return; }
+    function publishToCmd(obj){
+      if(!cmdTopic){ logLine('cmdTopic not ready'); return; }
       try{
         const m = new ROSLIB.Message({ data: JSON.stringify(obj) });
         cmdTopic.publish(m);
-        logLine('→ sent ' + JSON.stringify(obj));
+        logLine('→ sent to ~cmd: ' + JSON.stringify(obj));
       }catch(e){
-        logLine('publish error: ' + e.message);
+        logLine('publish ~cmd error: ' + e.message);
+      }
+    }
+
+    function publishToTeleop(obj){
+      if(!teleopTopic){ logLine('teleopTopic not ready'); return; }
+      try{
+        const m = new ROSLIB.Message({ data: JSON.stringify(obj) });
+        teleopTopic.publish(m);
+        logLine('→ sent to /teleop: ' + JSON.stringify(obj));
+      }catch(e){
+        logLine('publish teleop error: ' + e.message);
+      }
+    }
+
+    function publishCmd(obj){
+      if(!cmdTopic){ logLine('Not connected'); return; }
+      publishToCmd(obj);
+    }
+
+    // --- Teleop helper: decide where to send (teleopTopic always, ~cmd optionally) ---
+    function sendTeleopCommand(obj){
+      if(teleopTopic) publishToTeleop(obj);
+      const sendAlso = $('#sendAlsoToCmd').checked;
+      const localOnly = $('#teleopLocalOnly').checked;
+      if(sendAlso && !localOnly && cmdTopic){
+        try { publishToCmd(obj); } catch(e) { logLine('Failed sending teleop to ~cmd: ' + e.message); }
       }
     }
 
@@ -275,14 +387,14 @@
       ros.on('error', (err)=>{ setConnected(false); logLine('Connection error: ' + (err?.message||err)); });
     });
 
-    $('#btnDisconnect').addEventListener('click', ()=>{
-      try{ if(ros){ ros.close(); } } catch(e){}
-    });
+    $('#btnDisconnect').addEventListener('click', ()=>{ try{ if(ros){ ros.close(); } } catch(e){} });
 
+    // existing command buttons (play/stop/list etc)
     document.querySelectorAll('button[data-cmd]').forEach(btn=>{
       btn.addEventListener('click', ()=> publishCmd({ cmd: btn.dataset.cmd }) );
     });
 
+    // record buttons
     $('#btnRecordJoint').addEventListener('click', ()=>{
       const dwell = parseFloat($('#jointDwell').value||'0')||0;
       publishCmd({ cmd:'record_joint', dwell_s: dwell });
@@ -294,12 +406,14 @@
       publishCmd({ cmd:'record_tcp', dwell_s: dwell, speed_mm_s: speed });
     });
 
+    // gripper
     $('#btnGrip').addEventListener('click', ()=>{
       const action = $('#gripAction').value;
-      const width = parseFloat($('#gripWidth').value||'30')||30;
-      publishCmd({ cmd:'add_gripper', action, width_mm: width });
+      const force = parseFloat($('#gripForce').value || '') || 100;
+      publishCmd({ cmd: 'add_gripper', action: action, force_n: force });
     });
 
+    // raw JSON
     $('#btnSendRaw').addEventListener('click', ()=>{
       try{
         const obj = JSON.parse($('#rawJson').value);
@@ -309,13 +423,107 @@
       }
     });
 
-    $('#toggleLogs').addEventListener('change', (e)=>{
-      toggleRosout(e.target.checked);
+    // logs toggle
+    $('#toggleLogs').addEventListener('change', (e)=>{ toggleRosout(e.target.checked); });
+
+    // Teleop: start/stop
+    $('#btnTeleopStart').addEventListener('click', ()=>{
+      const obj = { cmd: 'teleop_start' };
+      sendTeleopCommand(obj);
+    });
+    $('#btnTeleopStop').addEventListener('click', ()=>{
+      const obj = { cmd: 'teleop_stop' };
+      sendTeleopCommand(obj);
     });
 
-    $('#ns').addEventListener('input', updateTopicLabels);
+    // Teleop nudges helpers
+    function nudge(dx=0, dy=0, dz=0, yaw_deg=0){
+      const trans_mm = parseFloat($('#teleopTrans').value || '5') || 5;
 
-    // Restore from localStorage
+      const dx_m = dx ? (trans_mm/1000.0) * Math.sign(dx) : 0;
+      const dy_m = dy ? (trans_mm/1000.0) * Math.sign(dy) : 0;
+      const dz_m = dz ? (trans_mm/1000.0) * Math.sign(dz) : 0;
+
+      const yaw_rad = (typeof yaw_deg === 'number' && yaw_deg !== 0)
+          ? (yaw_deg * Math.PI/180.0)
+          : 0;
+
+      const obj = { cmd: 'nudge', dx: dx_m, dy: dy_m, dz: dz_m };
+      if (yaw_rad !== 0) obj.yaw = yaw_rad;
+
+      sendTeleopCommand(obj);
+    }
+
+    function nudgeRoll(sign=+1){
+      const deg = parseFloat($('#teleopRoll').value||'5') || 5;
+      const rad = (sign * deg) * Math.PI/180.0;
+      sendTeleopCommand({ cmd:'nudge', roll: rad });
+    }
+
+    function nudgePitch(sign=+1){
+      const deg = parseFloat($('#teleopPitch').value||'5') || 5;
+      const rad = (sign * deg) * Math.PI/180.0;
+      sendTeleopCommand({ cmd:'nudge', pitch: rad });
+    }
+
+    // Nudge buttons: translation
+    $('#btnNudgeW').addEventListener('click', ()=> nudge(+1,0,0,0)); // +X
+    $('#btnNudgeS').addEventListener('click', ()=> nudge(-1,0,0,0)); // -X
+    $('#btnNudgeA').addEventListener('click', ()=> nudge(0,+1,0,0)); // +Y
+    $('#btnNudgeD').addEventListener('click', ()=> nudge(0,-1,0,0)); // -Y
+    $('#btnNudgeR').addEventListener('click', ()=> nudge(0,0,+1,0)); // +Z
+    $('#btnNudgeF').addEventListener('click', ()=> nudge(0,0,-1,0)); // -Z
+
+    // Yaw buttons
+    $('#btnNudgeQ').addEventListener('click', ()=> {
+      const yaw_deg = parseFloat($('#teleopYaw').value||'5') || 5;
+      sendTeleopCommand({ cmd:'nudge', yaw: yaw_deg * Math.PI/180.0 }); // +yaw
+    });
+    $('#btnNudgeE').addEventListener('click', ()=> {
+      const yaw_deg = parseFloat($('#teleopYaw').value||'5') || 5;
+      sendTeleopCommand({ cmd:'nudge', yaw: -yaw_deg * Math.PI/180.0 }); // -yaw
+    });
+
+    // Roll/Pitch buttons
+    $('#btnRollPlus').addEventListener('click', ()=> nudgeRoll(+1));
+    $('#btnRollMinus').addEventListener('click', ()=> nudgeRoll(-1));
+    $('#btnPitchPlus').addEventListener('click', ()=> nudgePitch(+1));
+    $('#btnPitchMinus').addEventListener('click', ()=> nudgePitch(-1));
+
+    // Misc
+    $('#btnNudgeG').addEventListener('click', ()=> sendTeleopCommand({ cmd: 'recapture' }));
+    $('#btnNudgeSpace').addEventListener('click', ()=> sendTeleopCommand({ cmd: 'stop' }));
+    $('#btnPrint').addEventListener('click', ()=> sendTeleopCommand({ cmd: 'print' }));
+
+    // Page keyboard support
+    let pageKeysEnabled = false;
+    $('#enablePageKeys').addEventListener('change', (e)=>{
+      pageKeysEnabled = e.target.checked;
+      logLine('Page keys ' + (pageKeysEnabled ? 'enabled' : 'disabled') + '. Focus this tab and press keys.');
+    });
+
+    window.addEventListener('keydown', (ev)=>{
+      if(!pageKeysEnabled) return;
+      const key = ev.key.toLowerCase();
+      if(key === 'w') { nudge(+1,0,0,0); ev.preventDefault(); }
+      else if(key === 's'){ nudge(-1,0,0,0); ev.preventDefault(); }
+      else if(key === 'a'){ nudge(0,+1,0,0); ev.preventDefault(); }
+      else if(key === 'd'){ nudge(0,-1,0,0); ev.preventDefault(); }
+      else if(key === 'r'){ nudge(0,0,+1,0); ev.preventDefault(); }
+      else if(key === 'f'){ nudge(0,0,-1,0); ev.preventDefault(); }
+      else if(key === 'q'){ const deg = parseFloat($('#teleopYaw').value||'5')||5; sendTeleopCommand({ cmd:'nudge', yaw:  deg*Math.PI/180.0 }); ev.preventDefault(); }
+      else if(key === 'e'){ const deg = parseFloat($('#teleopYaw').value||'5')||5; sendTeleopCommand({ cmd:'nudge', yaw: -deg*Math.PI/180.0 }); ev.preventDefault(); }
+      else if(key === 'z'){ nudgeRoll(+1); ev.preventDefault(); }
+      else if(key === 'x'){ nudgeRoll(-1); ev.preventDefault(); }
+      else if(key === 'c'){ nudgePitch(+1); ev.preventDefault(); }
+      else if(key === 'v'){ nudgePitch(-1); ev.preventDefault(); }
+      else if(key === 'g'){ sendTeleopCommand({ cmd: 'recapture' }); ev.preventDefault(); }
+      else if(key === 'p'){ sendTeleopCommand({ cmd: 'print' }); ev.preventDefault(); }
+      else if(ev.code === 'Space'){ sendTeleopCommand({ cmd: 'stop' }); ev.preventDefault(); }
+    });
+
+    // Restore from localStorage and initial setup
+    $('#ns').addEventListener('input', updateTopicLabels);
     (function(){
       try{
         const url = localStorage.getItem('vgr_ws'); if(url) $('#wsUrl').value = url;
@@ -324,6 +532,7 @@
       updateTopicLabels(); setConnected(false);
       logLine('Ready. Configure connection then click Connect.');
     })();
+
   </script>
 </body>
 </html>

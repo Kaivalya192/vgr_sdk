@@ -43,7 +43,7 @@ class StepTCP:
 class StepGripper:
     type: str  # "gripper"
     action: str  # "open" | "close"
-    width_mm: float
+    force_n: float  # grasp force in newtons (used for 'close'); ignored for 'open'
 
 def _is_joint(step: Dict[str, Any]) -> bool:   return step.get("type") == "joint"
 def _is_tcp(step: Dict[str, Any]) -> bool:     return step.get("type") == "tcp"
@@ -58,8 +58,8 @@ class DriverSmokeTest:
     Commands (publish JSON to ~cmd):
       {"cmd":"record_joint", "dwell_s":0.5}
       {"cmd":"record_tcp", "dwell_s":0.5, "speed_mm_s":150}
-      {"cmd":"add_gripper", "action":"open", "width_mm":40}
-      {"cmd":"add_gripper", "action":"close", "width_mm":20}
+      {"cmd":"add_gripper", "action":"open"}
+      {"cmd":"add_gripper", "action":"close", "force_n":100}
       {"cmd":"list"}
       {"cmd":"clear"}
       {"cmd":"save"}
@@ -73,7 +73,7 @@ class DriverSmokeTest:
       ~default_dwell_s        : 0.0
       ~topic_grasp_goal       : /robotA/grasp_action/goal
       ~topic_release_goal     : /robotA/release_action/goal
-      ~default_grasp_force_n  : 100.0   (used for 'close')
+      ~default_grasp_force_n  : 100.0   (used for 'close' when step doesn't specify force)
     """
 
     def __init__(self):
@@ -91,7 +91,7 @@ class DriverSmokeTest:
         self.joint_state = None  # type: Optional[List[float]]
         rospy.Subscriber("/joint_states", JointState, self._on_js, queue_size=50)
 
-        # Gripper (direct action goals; width->force mapping intentionally NOT used)
+        # Gripper (direct action goals; stroke/width logic removed — use force only)
         self.pub_grasp_goal = rospy.Publisher(self.topic_grasp_goal, GraspActionGoal, queue_size=10)
         self.pub_release_goal = rospy.Publisher(self.topic_release_goal, ReleaseActionGoal, queue_size=10)
 
@@ -133,8 +133,15 @@ class DriverSmokeTest:
             self._record_tcp(dwell_s=float(cmd.get("dwell_s", self.default_dwell_s)),
                              speed=float(cmd.get("speed_mm_s", self.default_tcp_speed)))
         elif c == "add_gripper":
-            self._add_gripper(action=str(cmd.get("action","open")).lower(),
-                              width_mm=float(cmd.get("width_mm", 30.0)))
+            # new API: use force_n for close; open ignores it
+            action = str(cmd.get("action","open")).lower()
+            force_n = cmd.get("force_n", None)
+            if force_n is None:
+                # if not provided, use default grasp force for 'close'; ignored for 'open'
+                force_n = float(self.default_grasp_force)
+            else:
+                force_n = float(force_n)
+            self._add_gripper(action=action, force_n=force_n)
         elif c == "play":
             self._play()
         elif c == "stop":
@@ -159,13 +166,16 @@ class DriverSmokeTest:
         self.steps.append(asdict(step))
         self._status(f"recorded TCP ({x:.1f},{y:.1f},{z:.1f},{yaw:.1f}) + dwell {dwell_s:.3f}s")
 
-    def _add_gripper(self, *, action: str, width_mm: float):
+    def _add_gripper(self, *, action: str, force_n: float):
         if action not in ("open","close"):
             self._status("gripper action must be 'open' or 'close'")
             return
-        step = StepGripper(type="gripper", action=action, width_mm=float(width_mm))
+        step = StepGripper(type="gripper", action=action, force_n=float(force_n))
         self.steps.append(asdict(step))
-        self._status(f"added GRIPPER {action} {width_mm:.1f}mm")
+        if action == "open":
+            self._status("added GRIPPER open")
+        else:
+            self._status(f"added GRIPPER close force={force_n:.1f}N")
 
     def _save(self):
         data = {"version": 1, "steps": self.steps}
@@ -177,7 +187,24 @@ class DriverSmokeTest:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
-            self.steps = list(data.get("steps", []))
+            loaded_steps = list(data.get("steps", []))
+
+            # Support legacy 'width_mm' entries by ignoring them and mapping to default force
+            normalized_steps: List[Dict[str, Any]] = []
+            for s in loaded_steps:
+                if _is_grip(s):
+                    # If file has an old 'width_mm' field, drop it and set force to default or to provided force_n
+                    if "force_n" in s:
+                        force = float(s.get("force_n", self.default_grasp_force))
+                    else:
+                        # legacy width_mm present? ignore value and use default force
+                        force = float(s.get("force_n", self.default_grasp_force))
+                    normalized = {"type": "gripper", "action": s.get("action", "open"), "force_n": force}
+                    normalized_steps.append(normalized)
+                else:
+                    normalized_steps.append(s)
+            self.steps = normalized_steps
+
             self._status(f"loaded {self.path} ({len(self.steps)} steps)")
         except Exception as e:
             self._status(f"load failed: {e}")
@@ -190,7 +217,9 @@ class DriverSmokeTest:
             elif _is_tcp(s):
                 lines.append(f"{i:02d} TCP x={s['x_mm']:.1f} y={s['y_mm']:.1f} z={s['z_mm']:.1f} yaw={s['yaw_deg']:.1f} spd={s.get('speed_mm_s',0):.0f} dwell={s.get('dwell_s',0):.2f}")
             elif _is_grip(s):
-                lines.append(f"{i:02d} GRIP {s['action']} {s['width_mm']:.1f}")
+                # show force if present; otherwise show default force
+                force = s.get("force_n", self.default_grasp_force)
+                lines.append(f"{i:02d} GRIP {s['action']} force={force:.1f}N")
             else:
                 lines.append(f"{i:02d} ??? {s}")
         txt = "\n".join(lines) if lines else "(no steps)"
@@ -247,16 +276,19 @@ class DriverSmokeTest:
                     self._dwell(s.get("dwell_s", 0.0))
 
                 elif _is_grip(s):
-                    if s["action"] == "open":
+                    action = s.get("action", "open")
+                    if action == "open":
                         self._ensure_conn(self.pub_release_goal)
                         self.pub_release_goal.publish(ReleaseActionGoal())
                         rospy.loginfo("[driver_smoke] GRIPPER open -> ReleaseActionGoal()")
                     else:
+                        # Use provided force_n if present, otherwise fallback to node default
+                        force = float(s.get("force_n", self.default_grasp_force))
                         self._ensure_conn(self.pub_grasp_goal)
                         g = GraspActionGoal()
-                        g.goal.grasp_force = float(self.default_grasp_force)
+                        g.goal.grasp_force = force
                         self.pub_grasp_goal.publish(g)
-                        rospy.loginfo(f"[driver_smoke] GRIPPER close -> GraspActionGoal(force={self.default_grasp_force:.1f}N)")
+                        rospy.loginfo(f"[driver_smoke] GRIPPER close -> GraspActionGoal(force={force:.1f}N)")
                     # tiny settle time
                     rospy.sleep(0.2)
                 else:

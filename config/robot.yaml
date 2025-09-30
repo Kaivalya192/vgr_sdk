@@ -1,8 +1,8 @@
 tcp_offset_mm: [0.0, 0.0, 0.0, 0.0]   # [dx, dy, dz, yaw] of tool TCP relative to flange
 speed_presets:
-  pick_speed_mm_s: 120.0
-  place_speed_mm_s: 120.0
-  transit_speed_mm_s: 400.0
+  pick_speed_mm_s: 220.0
+  place_speed_mm_s: 220.0
+  transit_speed_mm_s: 250.0
 heights_mm:
   approach_above: 50.0
   lift_after_pick: 60.0

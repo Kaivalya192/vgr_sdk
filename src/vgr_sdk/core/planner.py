@@ -66,12 +66,12 @@ class Plan:
 @dataclass
 class PickPlaceParams:
     """Reusable heights/speeds for VGR pick/place cycles."""
-    approach_above_mm: float = 50.0   # how high above pick/place to approach
-    lift_after_pick_mm: float = 60.0  # lift height after grasp
-    place_above_mm: float = 40.0      # pre-place height above target
-    pick_speed_mm_s: float = 120.0
-    transit_speed_mm_s: float = 400.0
-    place_speed_mm_s: float = 120.0
+    approach_above_mm: float = 60.0   # how high above pick/place to approach
+    lift_after_pick_mm: float = 80.0  # lift height after grasp
+    place_above_mm: float = 60.0      # pre-place height above target
+    pick_speed_mm_s: float = 250.0
+    transit_speed_mm_s: float = 350.0
+    place_speed_mm_s: float = 250.0
     joint_transit_speed_mm_s: float = 9999.0  # informational; real joint speed is driver-specific
 
 
