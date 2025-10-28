@@ -48,17 +48,27 @@ class VisionResult:
     camera: Dict[str, Any]
     result: List[ObjectDetections]
     timing_ms: Dict[str, float]
-
+    
     @classmethod
-    def from_json(cls, payload: Dict[str, Any]) -> "VisionResult":
-        """Lenient conversion from dict (no schema required)."""
-        version = str(payload.get("version", "1.0"))
-        sdk = dict(payload.get("sdk", {}))
-        session = dict(payload.get("session", {}))
-        timestamp_ms = int(payload.get("timestamp_ms", 0))
-        camera = dict(payload.get("camera", {}))
+    def from_json(cls, payload: Any) -> "VisionResult":
+        """Lenient conversion from JSON string or dict (accepts scalar fields too)."""
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        if not isinstance(payload, dict):
+            raise TypeError(f"VisionResult.from_json expected dict or str, got {type(payload)}")
 
-        # Parse objects/detections
+        version = str(payload.get("version", "1.0"))
+
+        sdk_val = payload.get("sdk", {})
+        sdk = dict(sdk_val) if isinstance(sdk_val, dict) else {"value": sdk_val}
+
+        session_val = payload.get("session", {})
+        session = dict(session_val) if isinstance(session_val, dict) else {"value": session_val}
+
+        timestamp_ms = int(payload.get("timestamp_ms", 0))
+        camera = dict(payload.get("camera", {})) if isinstance(payload.get("camera", {}), dict) else {}
+
+        # Parse objects/detections (unchanged from your original)
         result_block = payload.get("result", {}) or {}
         objects_raw = result_block.get("objects", []) or []
         objects: List[ObjectDetections] = []
@@ -85,9 +95,8 @@ class VisionResult:
                     pose=pose,
                     center=list(d.get("center")) if d.get("center") is not None else None,
                     quad=[list(q) for q in d.get("quad")] if d.get("quad") is not None else None,
-                    color=dict(d.get("color")) if d.get("color") is not None else None,
+                    color=dict(d.get("color")) if isinstance(d.get("color"), dict) else None,
                 )
-                # Pass through optional world fields (if present)
                 if d.get("center_world_mm") is not None:
                     det.center_world_mm = list(d.get("center_world_mm"))
                 if d.get("quad_world_mm") is not None:
@@ -97,7 +106,8 @@ class VisionResult:
                 obj.detections.append(det)
             objects.append(obj)
 
-        timing_ms = dict(payload.get("timing_ms", {}))
+        timing_ms = dict(payload.get("timing_ms", {})) if isinstance(payload.get("timing_ms", {}), dict) else {}
+
         return cls(
             version=version,
             sdk=sdk,

@@ -14,6 +14,7 @@ from vgr_sdk.tasks.sorting_task import SortingTask, SortingConfig
 from vgr_sdk.tasks.cnc_tending_task import CNCTendingTask, CNCTendingConfig
 from vgr_sdk.tasks.bin_pick2d_task import BinPick2DTask, BinPick2DConfig
 from vgr_sdk.tasks.kitting_task import KittingTask, KittingConfig
+import numpy as np
 
 
 class VGRManagerNode:
@@ -26,7 +27,7 @@ class VGRManagerNode:
         self.pub_topic = rospy.get_param("~pub_plan_topic", "/vgr/plan")
         self.plan_state_topic = rospy.get_param("~sub_plan_state_topic", "/vgr/plan_state")
 
-        self.pi_ip = rospy.get_param("~pi_ip", "10.1.149.182")
+        self.pi_ip = rospy.get_param("~pi_ip", "10.1.154.118")
         self.pi_port = int(rospy.get_param("~pi_port", 40002))
         self.trigger_kind = rospy.get_param("~trigger_kind", "json")  # "json" or "text"
         self.auto_trigger_after_done = bool(rospy.get_param("~auto_trigger_after_done", True))
@@ -45,6 +46,107 @@ class VGRManagerNode:
         self._last_payload_used: Optional[dict] = None
 
         rospy.loginfo(f"[vgr_manager] task={self.task_name} sub={self.sub_topic} pub={self.pub_topic} plan_state={self.plan_state_topic}")
+    def _wrap_pm180(self, deg: float) -> float:
+        # (-180, 180]
+        d = (deg + 180.0) % 360.0 - 180.0
+        # map -180 exactly to +180 if you prefer; leaving as -180 is fine
+        return d
+
+    def _wrap_pm90(self, deg: float) -> float:
+        # First to (-180, 180]
+        d = self._wrap_pm180(deg)
+        # Then fold to (-90, 90] by flipping 180° if outside
+        if d > 90.0:
+            d -= 180.0
+        elif d <= -90.0:
+            d += 180.0
+        return d
+    # ------- yaw helpers: minor-axis yaw from quad/bbox -------
+    def _angle_deg_img(self, dx: float, dy: float) -> float:
+        # Image coords: +x right, +y down; atan2(dy, dx) → angle w.r.t +x
+        ang = float(np.degrees(np.arctan2(dy, dx)))
+        # normalize to (-180,180]
+        return (ang + 180.0) % 360.0 - 180.0
+
+    def _minor_axis_yaw_img_deg_from_det(self, det: dict) -> Optional[float]:
+        """
+        Return image-space angle (deg) that aligns with the *shorter* side of the bbox/quad.
+        Prefers 'quad' = [[x,y],...], otherwise uses 'bbox' = [x,y,w,h].
+        Angle is measured along the chosen side direction.
+        """
+        try:
+            q = det.get("quad")
+            if isinstance(q, (list, tuple)) and len(q) == 4 and all(len(pt) >= 2 for pt in q):
+                # Use opposite edges: width ~ (tr-tl), height ~ (bl-tl) assuming near-rect
+                tl, tr, br, bl = q  # if ordering differs, result still robust via lengths
+                vx_w = (tr[0] - tl[0], tr[1] - tl[1])
+                vx_h = (bl[0] - tl[0], bl[1] - tl[1])
+                w = (vx_w[0]**2 + vx_w[1]**2) ** 0.5
+                h = (vx_h[0]**2 + vx_h[1]**2) ** 0.5
+                if w <= h:
+                    return self._angle_deg_img(vx_w[0], vx_w[1])
+                else:
+                    return self._angle_deg_img(vx_h[0], vx_h[1])
+
+            b = det.get("bbox")
+            if isinstance(b, (list, tuple)) and len(b) >= 4:
+                # bbox = [x, y, w, h]; choose shorter side direction
+                w, h = float(b[2]), float(b[3])
+                # for bbox we don't have edge orientation; pick canonical
+                #   - if width is shorter → 0° (along +x)
+                #   - if height is shorter → 90° (along +y)
+                return 0.0 if w <= h else 90.0
+        except Exception:
+            pass
+        return None
+
+    def _minor_axis_yaw_world_deg(self, det: dict) -> Optional[float]:
+        """
+        Minor-axis orientation in WORLD degrees.
+        Prefers true edge direction from 'quad'; falls back to 0°/90° using 'bbox'.
+        """
+        try:
+            # 1) Try quad (true orientation)
+            q = det.get("quad")
+            if isinstance(q, (list, tuple)) and len(q) == 4 and all(len(pt) >= 2 for pt in q):
+                # compute both principal edge vectors; pick the shorter one
+                # we don’t assume point order; evaluate all four edges and pick min length
+                pts = [(float(p[0]), float(p[1])) for p in q]
+                edges = [
+                    (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]),  # e01
+                    (pts[2][0] - pts[1][0], pts[2][1] - pts[1][1]),  # e12
+                    (pts[3][0] - pts[2][0], pts[3][1] - pts[2][1]),  # e23
+                    (pts[0][0] - pts[3][0], pts[0][1] - pts[3][1]),  # e30
+                ]
+                lens = [np.hypot(dx, dy) for (dx, dy) in edges]
+                i_min = int(np.argmin(lens))
+                dx, dy = edges[i_min]
+                img_deg = float(np.degrees(np.arctan2(dy, dx)))
+                # normalize to (-180,180]
+                img_deg = (img_deg + 180.0) % 360.0 - 180.0
+                try:
+                    return self._wrap_pm180(angle_img_to_world(img_deg, self.geom))  # <-- correct order
+                except Exception:
+                    # fallback: linear model
+                    ts = getattr(self.geom, "theta_sign", 1.0)
+                    yo = getattr(self.geom, "yaw_offset_deg", 0.0)
+                    return self._wrap_pm180(ts * img_deg + yo)
+
+            # 2) Fallback: bbox (no edge orientation; choose shorter side axis)
+            b = det.get("bbox")
+            if isinstance(b, (list, tuple)) and len(b) >= 4:
+                w, h = float(b[2]), float(b[3])
+                img_deg = 0.0 if w <= h else 90.0
+                try:
+                    return self._wrap_pm180(angle_img_to_world(img_deg, self.geom))  # <-- correct order
+                except Exception:
+                    ts = getattr(self.geom, "theta_sign", 1.0)
+                    yo = getattr(self.geom, "yaw_offset_deg", 0.0)
+                    return self._wrap_pm180(ts * img_deg + yo)
+        except Exception:
+            pass
+        return None
+
 
     # ------- loaders -------
     def _load_geom(self, path: str) -> tuple[GeomConfig, bool, Optional[tuple], Optional[tuple]]:
@@ -200,14 +302,15 @@ class VGRManagerNode:
             "instance_id": d0.get("instance_id", None),
             "center": d0.get("center", None)
         }
-
-    def _filter_payload_for_pick(self, payload: dict, sel: Dict[str, Any]) -> dict:
+            
+    def _filter_payload_for_pick(self, payload: dict, sel: Dict[str, Any]) -> tuple[dict, Optional[dict]]:
         out = {"version": payload.get("version"),
-               "sdk": payload.get("sdk"),
-               "session": payload.get("session"),
-               "timestamp_ms": payload.get("timestamp_ms"),
-               "camera": payload.get("camera"),
-               "result": {"counts": {"objects": 1, "detections": 1}, "objects": []}}
+            "sdk": payload.get("sdk"),
+            "session": payload.get("session"),
+            "timestamp_ms": payload.get("timestamp_ms"),
+            "camera": payload.get("camera"),
+            "result": {"counts": {"objects": 1, "detections": 1}, "objects": []}}
+        kept_det = None
         for obj in (payload.get("result", {}).get("objects") or []):
             if obj.get("name") != sel.get("name"):
                 continue
@@ -223,6 +326,7 @@ class VGRManagerNode:
                         keep_det = d; break
             if keep_det is None and (obj.get("detections") or []):
                 keep_det = (obj["detections"])[0]
+            kept_det = keep_det
             new_obj = {
                 "object_id": obj.get("object_id"),
                 "name": obj.get("name"),
@@ -231,34 +335,141 @@ class VGRManagerNode:
             }
             out["result"]["objects"].append(new_obj)
             break
-        return out
+        return out, kept_det
 
-    def _publish_plan_for_payload(self, payload_used: dict):
+    def _major_axis_yaw_world_deg(self, det: dict) -> Optional[float]:
+        """
+        Major-axis (longer side) orientation in WORLD degrees.
+        Prefers true edge direction from 'quad'; falls back to 0°/90° using 'bbox'.
+        """
+        try:
+            # --- Prefer QUAD: measure all four edges, pick the longest
+            q = det.get("quad")
+            if isinstance(q, (list, tuple)) and len(q) == 4 and all(len(pt) >= 2 for pt in q):
+                pts = [(float(p[0]), float(p[1])) for p in q]
+                edges = [
+                    (pts[1][0]-pts[0][0], pts[1][1]-pts[0][1]),  # e01
+                    (pts[2][0]-pts[1][0], pts[2][1]-pts[1][1]),  # e12
+                    (pts[3][0]-pts[2][0], pts[3][1]-pts[2][1]),  # e23
+                    (pts[0][0]-pts[3][0], pts[0][1]-pts[3][1]),  # e30
+                ]
+                lens = [np.hypot(dx, dy) for (dx,dy) in edges]
+                i_max = int(np.argmax(lens))
+                dx, dy = edges[i_max]
+                img_deg = float(np.degrees(np.arctan2(dy, dx)))
+                img_deg = (img_deg + 180.0) % 360.0 - 180.0  # (-180,180]
+                try:
+                    return self._wrap_pm180(angle_img_to_world(img_deg, self.geom))
+                except Exception:
+                    ts = getattr(self.geom, "theta_sign", 1.0)
+                    yo = getattr(self.geom, "yaw_offset_deg", 0.0)
+                    return self._wrap_pm180(ts * img_deg + yo)
+
+            # --- Fallback: BBOX (no edge direction; choose longer side axis 0° or 90°)
+            b = det.get("bbox")
+            if isinstance(b, (list, tuple)) and len(b) >= 4:
+                w, h = float(b[2]), float(b[3])
+                img_deg = 0.0 if w >= h else 90.0  # major axis: along x if wide, else along y
+                try:
+                    return self._wrap_pm180(angle_img_to_world(img_deg, self.geom))
+                except Exception:
+                    ts = getattr(self.geom, "theta_sign", 1.0)
+                    yo = getattr(self.geom, "yaw_offset_deg", 0.0)
+                    return self._wrap_pm180(ts * img_deg + yo)
+        except Exception:
+            pass
+        return None
+
+    def _publish_plan_for_payload(self, payload_used: dict, kept_det: Optional[dict] = None):
         try:
             vr = VisionResult.from_json(payload_used)
         except Exception as e:
             rospy.logwarn(f"[vgr_manager] VisionResult parse failed: {e}")
             return
+
         try:
             plan, pick = self.task.plan_cycle(vr)  # type: ignore[attr-defined]
         except Exception as e:
             rospy.logwarn(f"[vgr_manager] planning error: {e}")
             return
+
         if not plan or not pick:
             return
+
         pd = plan.to_dict()
         wps = pd.get("waypoints", [])
+        # -------- PICK yaw: force to MINOR axis (shorter side) from the detection --------
+        desired_pick_yaw = None
+        if kept_det is not None:
+            minor_world = self._minor_axis_yaw_world_deg(kept_det)  # quad preferred; bbox fallback (0°/90°)
+            if minor_world is not None:
+                desired_pick_yaw = self._wrap_pm90(minor_world)
+                rospy.loginfo(f"[vgr_manager] minor-axis (from quad/bbox): pick yaw := {desired_pick_yaw:.6f}°")
+            else:
+                rospy.logwarn("[vgr_manager] could not compute minor-axis yaw → leaving pick yaw as-is")
+
+        # Apply override ONLY to the pick pose (leave plan waypoints unchanged except wrap_pm90)
+        if isinstance(pick.get("pose_world"), dict) and "yaw_deg" in pick["pose_world"]:
+            base_yaw = float(pick["pose_world"]["yaw_deg"])
+            if desired_pick_yaw is not None:
+                rospy.loginfo(f"[vgr_manager] pick yaw override: {base_yaw:.6f}° → {desired_pick_yaw:.6f}°")
+                pick["pose_world"]["yaw_deg"] = desired_pick_yaw
+            else:
+                pick["pose_world"]["yaw_deg"] = self._wrap_pm90(base_yaw)
+
+        # -------- Waypoints: keep original behavior (ONLY wrap to ±90), no minor-axis override --------
+        for wp in wps:
+            tag = str(wp.get("tag", "")).lower()
+            if tag in ("prehome", "home"):
+                continue
+            pose = wp.get("pose") if isinstance(wp.get("pose"), dict) else wp
+            if isinstance(pose, dict) and "yaw_deg" in pose:
+                pose["yaw_deg"] = self._wrap_pm90(float(pose["yaw_deg"]))
+
+        # Homing + publish
         self._append_homing_waypoints(wps)
         pd["waypoints"] = wps
+        # -------- Waypoints --------
+        # Keep all non-pick waypoints as-is (except wrapping). If we have a desired pick yaw,
+        # force it only on the pick-phase segments.
+        # -------- Waypoints --------
+        # Force minor-axis yaw ONLY for the pick phase (APPROACH/DESCEND/GRASP/LIFT),
+        # stop overriding as soon as we pass LIFT. Everything else just gets wrapped.
+        pick_phase_tags = {"approach", "descend", "grasp", "lift"}
+        seen_lift = False
+
+        for wp in wps:
+            tag = str(wp.get("tag", "")).lower()
+            pose = wp.get("pose") if isinstance(wp.get("pose"), dict) else wp
+            if not isinstance(pose, dict) or "yaw_deg" not in pose:
+                continue
+
+            if (desired_pick_yaw is not None) and (tag in pick_phase_tags) and not seen_lift:
+                old = float(pose["yaw_deg"])
+                pose["yaw_deg"] = self._wrap_pm90(desired_pick_yaw)
+                rospy.loginfo(f"[vgr_manager] set {tag.upper()} yaw: {old:.3f}° → {pose['yaw_deg']:.3f}°")
+            else:
+                pose["yaw_deg"] = self._wrap_pm90(float(pose["yaw_deg"]))
+
+            if tag == "lift":
+                seen_lift = True
+
+
         out = {"plan": pd, "pick": pick}
         self.pub_plan.publish(String(data=json.dumps(out, separators=(",", ":"))))
+
         g = pick.get("grasp", {})
         rospy.loginfo(
-            f"[vgr_manager] plan published (+homing): open={g.get('recommended_open_mm', 0):.1f} mm, "
-            f"pick=({pick['pose_world']['x_mm']:.1f},{pick['pose_world']['y_mm']:.1f},{pick['pose_world']['z_mm']:.1f}) "
+            f"[vgr_manager] plan published (+homing): "
+            f"open={g.get('recommended_open_mm', 0):.1f} mm, "
+            f"pick=({pick['pose_world']['x_mm']:.1f},"
+            f"{pick['pose_world']['y_mm']:.1f},"
+            f"{pick['pose_world']['z_mm']:.1f}) "
+            f"yaw={pick['pose_world'].get('yaw_deg','?')}° "
             f"→ waypoints={len(pd.get('waypoints', []))}"
         )
         self._busy = True
+
 
     # ------- callbacks -------
     def _on_plan_state(self, msg: String):
@@ -267,13 +478,33 @@ class VGRManagerNode:
             self._busy = False
             if self.auto_trigger_after_done:
                 self._trigger_detection()
+                
+    def _det_box_wh(self, det: dict):
+        b = det.get("bbox")
+        if isinstance(b, (list, tuple)) and len(b) >= 4:
+            return float(b[2]), float(b[3])  # w, h
+        q = det.get("quad")
+        if isinstance(q, (list, tuple)) and len(q) == 4 and all(len(pt) >= 2 for pt in q):
+            tl, tr, br, bl = q
+            w = float(((tr[0]-tl[0])**2 + (tr[1]-tl[1])**2) ** 0.5)
+            h = float(((bl[0]-tl[0])**2 + (bl[1]-tl[1])**2) ** 0.5)
+            return w, h
+        return None
 
+    
     def _on_result(self, msg: String):
+        raw = (msg.data or "").strip()
         try:
-            payload_raw = json.loads(msg.data)
-        except Exception:
-            rospy.logwarn("[vgr_manager] invalid JSON on /vgr/vision_result")
+            payload_raw = json.loads(raw)
+            if isinstance(payload_raw, str):
+                payload_raw = json.loads(payload_raw)
+        except Exception as e:
+            rospy.logwarn("[vgr_manager] invalid JSON on %s: %s", self.sub_topic, e)
             return
+
+        # 👇 Debug print here
+        rospy.loginfo(f"[vgr_manager] got result: {json.dumps(payload_raw, indent=2)[:500]}...")
+
         payload_used = self._swap_payload_xy(payload_raw) if self._swap_xy else payload_raw
         self._last_payload_used = payload_used
         if self._busy:
@@ -281,8 +512,8 @@ class VGRManagerNode:
         sel = self._select_next_target(payload_used)
         if not sel:
             return
-        filtered = self._filter_payload_for_pick(payload_used, sel)
-        self._publish_plan_for_payload(filtered)
+        filtered, kept_det = self._filter_payload_for_pick(payload_used, sel)
+        self._publish_plan_for_payload(filtered, kept_det)
 
 def main():
     rospy.init_node("vgr_manager_node", anonymous=False)
